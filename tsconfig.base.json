@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "baseUrl": ".",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "paths": {
+      "@meowcode/auth": ["packages/auth/src/index.ts"],
+      "@meowcode/database": ["packages/database/src/index.ts"],
+      "@meowcode/providers": ["packages/providers/src/index.ts"],
+      "@meowcode/router": ["packages/router/src/index.ts"],
+      "@meowcode/sdk": ["packages/sdk/src/index.ts"],
+      "@meowcode/shared": ["packages/shared/src/index.ts"],
+      "@meowcode/ui": ["packages/ui/src/index.ts"]
+    }
+  }
+}

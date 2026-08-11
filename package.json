@@ -1,0 +1,35 @@
+{
+  "name": "meow-code",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Universal AI platform for web, CLI, providers, routing, and OpenAI-compatible APIs.",
+  "type": "module",
+  "packageManager": "npm@11.12.1",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev": "npm run dev --workspace @meowcode/web",
+    "dev:api": "npm run dev --workspace @meowcode/api",
+    "dev:cli": "npm run dev --workspace @meowcode/cli",
+    "lint": "eslint . --ext .ts,.tsx",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "format": "prettier --write .",
+    "db:generate": "prisma generate --schema packages/database/prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev --schema packages/database/prisma/schema.prisma"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@typescript-eslint/eslint-plugin": "^8.18.2",
+    "@typescript-eslint/parser": "^8.18.2",
+    "eslint": "^9.17.0",
+    "prettier": "^3.4.2",
+    "prisma": "^6.1.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

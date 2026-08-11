@@ -1,0 +1,16 @@
+{
+  "name": "@meowcode/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "meow": "src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@meowcode/sdk": "0.1.0",
+    "commander": "^12.1.0"
+  }
+}

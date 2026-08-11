@@ -1,0 +1,13 @@
+{
+  "name": "@meowcode/auth",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@meowcode/shared": "0.1.0"
+  }
+}

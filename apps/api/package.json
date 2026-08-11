@@ -1,0 +1,23 @@
+{
+  "name": "@meowcode/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -b",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.2",
+    "@fastify/multipart": "^10.1.0",
+    "@fastify/rate-limit": "^10.1.1",
+    "@meowcode/auth": "0.1.0",
+    "@meowcode/database": "0.1.0",
+    "@meowcode/providers": "0.1.0",
+    "@meowcode/router": "0.1.0",
+    "@meowcode/shared": "0.1.0",
+    "fastify": "^5.2.1",
+    "zod": "^3.24.1"
+  }
+}

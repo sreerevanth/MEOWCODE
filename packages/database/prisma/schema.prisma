@@ -1,0 +1,388 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WorkspaceKind {
+  personal
+  team
+}
+
+enum WorkspaceRole {
+  owner
+  admin
+  developer
+  viewer
+}
+
+enum ProviderHealthStatus {
+  healthy
+  slow
+  degraded
+  offline
+  auth_failed
+  rate_limited
+  invalid_endpoint
+  unknown_error
+  unknown
+}
+
+enum RoutingMode {
+  auto
+  cheapest
+  fastest
+  highest_quality
+  free_only
+  local_only
+  vision
+  reasoning
+  manual_provider
+  manual_model
+}
+
+enum OnboardingStep {
+  create_workspace
+  invite_team
+  connect_providers
+  verify_providers
+  sync_models
+  complete
+}
+
+model User {
+  id               String         @id @default(cuid())
+  email            String         @unique
+  name             String?
+  imageUrl         String?
+  passwordHash     String?
+  onboardingStep   OnboardingStep @default(create_workspace)
+  preferences      Json?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  accounts      Account[]
+  memberships   WorkspaceMember[]
+  conversations Conversation[]
+  sessions      Session[]
+  invitesSent   WorkspaceInvite[] @relation("InviteSender")
+  auditLogs     AuditLog[]
+}
+
+model Account {
+  id                String   @id @default(cuid())
+  userId            String
+  provider          String
+  providerAccountId String
+  createdAt         DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id               String   @id @default(cuid())
+  userId           String
+  refreshTokenHash String
+  userAgent        String?
+  ipAddress        String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([refreshTokenHash])
+}
+
+model Workspace {
+  id        String        @id @default(cuid())
+  name      String
+  slug      String        @unique
+  kind      WorkspaceKind
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  members       WorkspaceMember[]
+  providers     ProviderConnection[]
+  models        Model[]
+  conversations Conversation[]
+  prompts       Prompt[]
+  apiKeys       ApiKey[]
+  auditLogs     AuditLog[]
+  usageRecords  UsageRecord[]
+  routingRules  RoutingRule[]
+  invites       WorkspaceInvite[]
+  settings      WorkspaceSettings?
+  uploads       Upload[]
+}
+
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+  userId      String
+  workspaceId String
+  role        WorkspaceRole
+  createdAt   DateTime      @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+}
+
+model WorkspaceInvite {
+  id              String        @id @default(cuid())
+  workspaceId     String
+  email           String
+  role            WorkspaceRole @default(developer)
+  token           String        @unique
+  invitedByUserId String
+  acceptedAt      DateTime?
+  expiresAt       DateTime
+  createdAt       DateTime      @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy User      @relation("InviteSender", fields: [invitedByUserId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, email])
+}
+
+model WorkspaceSettings {
+  workspaceId         String      @id
+  defaultRoutingMode  RoutingMode @default(auto)
+  defaultModelId      String?
+  theme               String      @default("system")
+  preferences         Json?
+  updatedAt           DateTime    @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model ProviderConnection {
+  id                  String               @id @default(cuid())
+  workspaceId         String
+  providerId          String
+  displayName         String
+  encryptedApiKey     String?
+  endpoint            String?
+  organizationId      String?
+  projectId           String?
+  customHeaders       Json?
+  timeoutMs           Int                  @default(60000)
+  retryPolicy         Json?
+  isConnected         Boolean              @default(false)
+  healthStatus        ProviderHealthStatus @default(unknown)
+  lastHealthMessage   String?
+  lastHealthCheckAt   DateTime?
+  healthFailureCount  Int                  @default(0)
+  healthSuccessCount  Int                  @default(0)
+  availabilityPct     Decimal?
+  latencyConnectionMs Int?
+  latencyTtfbMs       Int?
+  latencyTotalMs      Int?
+  latencyAvgMs        Int?
+  latencyP50Ms        Int?
+  latencyP95Ms        Int?
+  lastLatencyCheckAt  DateTime?
+  lastRequestAt       DateTime?
+  lastSyncAt          DateTime?
+  lastSyncStatus      String?
+  lastSyncMessage     String?
+  lastSeenAt          DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  workspace       Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  models          Model[]
+  syncHistory     ProviderSyncHistory[]
+  latencySamples  ProviderLatencySample[]
+
+  @@unique([workspaceId, providerId])
+}
+
+model ProviderSyncHistory {
+  id                   String   @id @default(cuid())
+  providerConnectionId String
+  status               String
+  modelsDiscovered     Int      @default(0)
+  message              String?
+  startedAt            DateTime
+  completedAt          DateTime?
+  durationMs           Int?
+
+  providerConnection ProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: Cascade)
+
+  @@index([providerConnectionId, startedAt])
+}
+
+model ProviderLatencySample {
+  id                   String   @id @default(cuid())
+  providerConnectionId String
+  connectionMs         Int
+  ttfbMs               Int
+  totalMs              Int
+  recordedAt           DateTime @default(now())
+
+  providerConnection ProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: Cascade)
+
+  @@index([providerConnectionId, recordedAt])
+}
+
+model Model {
+  id                   String   @id @default(cuid())
+  workspaceId          String
+  providerConnectionId String
+  providerId           String
+  modelId              String
+  displayName          String
+  family               String?
+  capabilities         String[]
+  contextWindow        Int?
+  maxOutputTokens      Int?
+  inputPerMillionUsd   Decimal?
+  outputPerMillionUsd  Decimal?
+  isFree               Boolean  @default(false)
+  isLocal              Boolean  @default(false)
+  qualityScore         Int?
+  latencyP50Ms         Int?
+  metadata             Json?
+  discoveredAt         DateTime
+  updatedAt            DateTime @updatedAt
+
+  workspace          Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  providerConnection ProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, providerId, modelId])
+}
+
+model RoutingRule {
+  id                   String      @id @default(cuid())
+  workspaceId          String
+  name                 String
+  mode                 RoutingMode @default(auto)
+  manualProviderId     String?
+  manualModelId        String?
+  requiredCapabilities String[]
+  fallbackModelIds     String[]
+  retryCount           Int         @default(2)
+  timeoutMs            Int         @default(60000)
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model Conversation {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  title       String
+  folderId    String?
+  pinned      Boolean  @default(false)
+  favorite    Boolean  @default(false)
+  shared      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  Message[]
+
+  @@index([workspaceId, updatedAt])
+  @@index([userId])
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  parentId       String?
+  role           String
+  content        String
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+model Upload {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  filename    String
+  mimeType    String
+  sizeBytes   Int
+  storagePath String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+}
+
+model Prompt {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  body        String
+  tags        String[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String
+  keyHash     String
+  scopes      String[]
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  revokedAt   DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([keyHash])
+}
+
+model UsageRecord {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  providerId   String
+  modelId      String
+  inputTokens  Int
+  outputTokens Int
+  costUsd      Decimal
+  latencyMs    Int
+  success      Boolean
+  createdAt    DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  workspaceId String?
+  actorUserId String?
+  action      String
+  target      String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor     User?      @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+}

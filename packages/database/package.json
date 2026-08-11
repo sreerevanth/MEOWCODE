@@ -1,0 +1,13 @@
+{
+  "name": "@meowcode/database",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.1.0"
+  }
+}

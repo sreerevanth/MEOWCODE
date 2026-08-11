@@ -1,0 +1,18 @@
+{
+  "name": "@meowcode/ui",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.tsx",
+  "types": "src/index.tsx",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "react": "^19.0.0",
+    "tailwind-merge": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.2"
+  }
+}
