@@ -22,7 +22,7 @@
     "db:migrate": "prisma migrate dev --schema packages/database/prisma/schema.prisma"
   },
   "devDependencies": {
-    "@types/node": "^22.10.2",
+    "@types/node": "^20.19.43",
     "@typescript-eslint/eslint-plugin": "^8.18.2",
     "@typescript-eslint/parser": "^8.18.2",
     "eslint": "^9.17.0",

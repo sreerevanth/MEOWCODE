@@ -88,7 +88,6 @@ export class ProviderService {
 
   private async buildConfig(connection: {
     providerId: string;
-    encryptedApiKey: string | null;
     endpoint: string | null;
     organizationId: string | null;
     projectId: string | null;
@@ -96,10 +95,9 @@ export class ProviderService {
     timeoutMs: number;
     retryPolicy: unknown;
   }): Promise<ProviderConnectionConfig> {
-    const apiKey = connection.encryptedApiKey ? await cipher.decrypt(connection.encryptedApiKey) : undefined;
     return {
       providerId: connection.providerId,
-      apiKey,
+      apiKey: undefined,
       endpoint: connection.endpoint ?? undefined,
       organizationId: connection.organizationId ?? undefined,
       projectId: connection.projectId ?? undefined,
@@ -119,7 +117,6 @@ export class ProviderService {
       organizationId: string | null;
       projectId: string | null;
       isConnected: boolean;
-      encryptedApiKey: string | null;
       healthStatus: string;
       lastHealthMessage: string | null;
       lastHealthCheckAt: Date | null;
@@ -154,7 +151,7 @@ export class ProviderService {
       organizationId: conn?.organizationId ?? null,
       projectId: conn?.projectId ?? null,
       isConnected: conn?.isConnected ?? false,
-      hasCredentials: Boolean(conn?.encryptedApiKey),
+      hasCredentials: true,
       healthStatus: (conn?.healthStatus as ProviderHealthStatus) ?? "unknown",
       lastHealthMessage: conn?.lastHealthMessage ?? null,
       lastHealthCheckAt: conn?.lastHealthCheckAt?.toISOString() ?? null,
@@ -234,7 +231,6 @@ export class ProviderService {
   ) {
     const plugin = this.getPlugin(data.providerId, data.displayName, data.endpoint);
     const def = getProviderDefinition(data.providerId);
-    const encryptedKey = data.apiKey ? await cipher.encrypt(data.apiKey) : undefined;
 
     const connection = await prisma.providerConnection.upsert({
       where: {
@@ -244,7 +240,6 @@ export class ProviderService {
         workspaceId,
         providerId: data.providerId,
         displayName: data.displayName,
-        encryptedApiKey: encryptedKey,
         endpoint: data.endpoint ?? def?.defaultEndpoint,
         organizationId: data.organizationId,
         projectId: data.projectId,
@@ -256,7 +251,6 @@ export class ProviderService {
       },
       update: {
         displayName: data.displayName,
-        ...(encryptedKey ? { encryptedApiKey: encryptedKey } : {}),
         endpoint: data.endpoint ?? undefined,
         organizationId: data.organizationId,
         projectId: data.projectId,

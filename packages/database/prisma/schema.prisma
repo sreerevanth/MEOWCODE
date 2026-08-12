@@ -66,7 +66,6 @@ model User {
 
   accounts      Account[]
   memberships   WorkspaceMember[]
-  conversations Conversation[]
   sessions      Session[]
   invitesSent   WorkspaceInvite[] @relation("InviteSender")
   auditLogs     AuditLog[]
@@ -112,7 +111,6 @@ model Workspace {
   members       WorkspaceMember[]
   providers     ProviderConnection[]
   models        Model[]
-  conversations Conversation[]
   prompts       Prompt[]
   apiKeys       ApiKey[]
   auditLogs     AuditLog[]
@@ -169,7 +167,6 @@ model ProviderConnection {
   workspaceId         String
   providerId          String
   displayName         String
-  encryptedApiKey     String?
   endpoint            String?
   organizationId      String?
   projectId           String?
@@ -278,39 +275,8 @@ model RoutingRule {
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
-model Conversation {
-  id          String   @id @default(cuid())
-  workspaceId String
-  userId      String
-  title       String
-  folderId    String?
-  pinned      Boolean  @default(false)
-  favorite    Boolean  @default(false)
-  shared      Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages  Message[]
-
-  @@index([workspaceId, updatedAt])
-  @@index([userId])
-}
-
-model Message {
-  id             String   @id @default(cuid())
-  conversationId String
-  parentId       String?
-  role           String
-  content        String
-  metadata       Json?
-  createdAt      DateTime @default(now())
-
-  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-
-  @@index([conversationId, createdAt])
-}
+// ponytail: Conversation and Message models deleted to enforce 100% Privacy.
+// All chat history is now stored client-side in IndexedDB.
 
 model Upload {
   id          String   @id @default(cuid())

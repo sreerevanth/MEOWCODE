@@ -4,14 +4,12 @@ export function capitalize(value: string): string {
 }
 
 export function formatCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
+  return Intl.NumberFormat("en-US", { notation: "compact" }).format(n);
 }
 
 export function formatUsd(n: number): string {
   if (n < 0.01 && n > 0) return "<$0.01";
-  return `$${n.toFixed(n >= 1 ? 2 : 4)}`;
+  return Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: n >= 1 ? 2 : 4 }).format(n);
 }
 
 export function estimateTokens(text: string): number {
@@ -20,7 +18,7 @@ export function estimateTokens(text: string): number {
 
 export function formatDate(iso: string): string {
   try {
-    return new Date(iso).toLocaleString();
+    return Intl.DateTimeFormat("en-US", { dateStyle: "short", timeStyle: "short" }).format(new Date(iso));
   } catch {
     return iso;
   }

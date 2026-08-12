@@ -109,7 +109,7 @@ export async function workspaceRoutes(app: FastifyInstance) {
         workspace: {
           include: {
             settings: true,
-            _count: { select: { members: true, providers: true, models: true, conversations: true } }
+            _count: { select: { members: true, providers: true, models: true } }
           }
         }
       }
@@ -367,5 +367,26 @@ export async function workspaceRoutes(app: FastifyInstance) {
       expiresAt: i.expiresAt.toISOString(),
       createdAt: i.createdAt.toISOString()
     }));
+  });
+
+  app.get("/v1/workspaces/:id/export", async (request, reply) => {
+    const principal = await requireAuth(request, reply);
+    if (!principal) return;
+    const { id } = request.params as { id: string };
+
+    const membership = await prisma.workspaceMember.findUnique({
+      where: { userId_workspaceId: { userId: principal.userId, workspaceId: id } }
+    });
+    if (!membership) return reply.status(404).send({ error: "Workspace not found" });
+
+    const data = await prisma.workspace.findUnique({
+      where: { id },
+      include: {
+        settings: true
+      }
+    });
+
+    reply.header("Content-Disposition", `attachment; filename="workspace_${id}_export.json"`);
+    return data;
   });
 }

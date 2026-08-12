@@ -40,6 +40,19 @@ export class ModelRouter {
         }
         throw new Error(`All models in route plan failed. Last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
     }
+    // ponytail: Synthetic MoE. Fires up to 3 models concurrently.
+    async executeMoE(plan, executor, synthesizer) {
+        const chain = [plan.primary, ...plan.fallbacks].slice(0, 3);
+        const promises = chain.map((model) => executor(model).catch(() => null));
+        const results = await Promise.all(promises);
+        const validResults = results.filter((r) => r !== null);
+        if (validResults.length === 0)
+            throw new Error("MoE failed: all models crashed.");
+        if (validResults.length === 1)
+            return { result: validResults[0], usedModels: [chain[results.findIndex((r) => r !== null)]] };
+        const finalResult = await synthesizer(validResults);
+        return { result: finalResult, usedModels: chain };
+    }
     filterCandidates(request) {
         return request.models.filter((model) => {
             if (request.connectedProviderIds && !request.connectedProviderIds.has(model.providerId)) {

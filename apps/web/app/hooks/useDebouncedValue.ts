@@ -1,14 +1,8 @@
 "use client";
 
-import * as React from "react";
+import { useDeferredValue } from "react";
 
-export function useDebouncedValue<T>(value: T, delayMs = 300): T {
-  const [debounced, setDebounced] = React.useState(value);
-
-  React.useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(value), delayMs);
-    return () => window.clearTimeout(timer);
-  }, [value, delayMs]);
-
-  return debounced;
+export function useDebouncedValue<T>(value: T, _delayMs = 300): T {
+  // ponytail: native platform feature covers this
+  return useDeferredValue(value);
 }

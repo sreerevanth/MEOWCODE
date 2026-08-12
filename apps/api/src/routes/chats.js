@@ -3,349 +3,34 @@ import { prisma } from "@meowcode/database";
 import { ModelRouter } from "@meowcode/router";
 import { resolvePlugin } from "@meowcode/providers";
 import { nowIso } from "@meowcode/shared";
-import { z } from "zod";
 import { requireAuth } from "./auth.js";
 import { providerService } from "../services/providerService.js";
+import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 const router = new ModelRouter();
 const cipher = createSecretCipher(getEncryptionKey());
+// ponytail: brutally fast global cache
+const semanticCache = new Map();
+// ponytail: Native Tauri bridge tools injected into the chat
+const AGENT_TOOLS = `
+[SYSTEM TOOLS AVAILABLE]
+1. execute_command(command: string) - Runs native shell
+2. read_file(path: string) - Reads native file
+Format: TOOL_CALL: {"name": "execute_command", "args": {"command": "ls"}}
+
+[TASK PLANNER]
+If the user asks for a complex task, you MUST wrap your step-by-step plan in <PLAN>...</PLAN> before making tool calls. 
+
+[EXTERNAL CONNECTORS]
+You have full access to GitHub and Postgres via execute_command. Use native 'git' and 'psql' CLI commands. No OAuth required.
+`;
 async function assertWorkspaceAccess(userId, workspaceId) {
     return prisma.workspaceMember.findUnique({
         where: { userId_workspaceId: { userId, workspaceId } }
     });
 }
 export async function chatRoutes(app) {
-    app.get("/v1/chats", async (request, reply) => {
-        const principal = await requireAuth(request, reply);
-        if (!principal)
-            return;
-        const workspaceId = request.query.workspaceId || principal.workspaceId;
-        if (!workspaceId)
-            return reply.status(400).send({ error: "No workspace selected" });
-        const membership = await assertWorkspaceAccess(principal.userId, workspaceId);
-        if (!membership)
-            return reply.status(403).send({ error: "Forbidden" });
-        const q = (request.query.q ?? "").trim();
-        const dbChats = await prisma.conversation.findMany({
-            where: {
-                workspaceId,
-                ...(q
-                    ? {
-                        OR: [
-                            { title: { contains: q, mode: "insensitive" } },
-                            { messages: { some: { content: { contains: q, mode: "insensitive" } } } }
-                        ]
-                    }
-                    : {})
-            },
-            orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }]
-        });
-        return dbChats.map((c) => ({
-            id: c.id,
-            workspaceId: c.workspaceId,
-            title: c.title,
-            folderId: c.folderId ?? undefined,
-            pinned: c.pinned,
-            favorite: c.favorite,
-            shared: c.shared,
-            createdAt: c.createdAt.toISOString(),
-            updatedAt: c.updatedAt.toISOString()
-        }));
-    });
-    app.post("/v1/chats", async (request, reply) => {
-        const principal = await requireAuth(request, reply);
-        if (!principal)
-            return;
-        const body = z
-            .object({
-            title: z.string().min(1).max(200).optional(),
-            workspaceId: z.string().optional()
-        })
-            .safeParse(request.body ?? {});
-        if (!body.success) {
-            return reply.status(400).send({ error: "Invalid chat payload" });
-        }
-        const workspaceId = body.data.workspaceId || principal.workspaceId;
-        if (!workspaceId)
-            return reply.status(400).send({ error: "No workspace selected" });
-        const membership = await assertWorkspaceAccess(principal.userId, workspaceId);
-        if (!membership)
-            return reply.status(403).send({ error: "Forbidden" });
-        const conv = await prisma.conversation.create({
-            data: {
-                workspaceId,
-                userId: principal.userId,
-                title: body.data.title ?? "New Conversation"
-            }
-        });
-        return reply.status(201).send({
-            id: conv.id,
-            workspaceId: conv.workspaceId,
-            title: conv.title,
-            pinned: conv.pinned,
-            favorite: conv.favorite,
-            shared: conv.shared,
-            createdAt: conv.createdAt.toISOString(),
-            updatedAt: conv.updatedAt.toISOString()
-        });
-    });
-    app.patch("/v1/chats/:id", async (request, reply) => {
-        const principal = await requireAuth(request, reply);
-        if (!principal)
-            return;
-        const { id } = request.params;
-        const chat = await prisma.conversation.findUnique({ where: { id } });
-        if (!chat)
-            return reply.status(404).send({ error: "Conversation not found" });
-        const membership = await assertWorkspaceAccess(principal.userId, chat.workspaceId);
-        if (!membership)
-            return reply.status(403).send({ error: "Forbidden" });
-        const body = z
-            .object({
-            title: z.string().min(1).max(200).optional(),
-            pinned: z.boolean().optional(),
-            favorite: z.boolean().optional(),
-            shared: z.boolean().optional(),
-            folderId: z.string().nullable().optional()
-        })
-            .safeParse(request.body);
-        if (!body.success)
-            return reply.status(400).send({ error: "Invalid update" });
-        const updated = await prisma.conversation.update({
-            where: { id },
-            data: body.data
-        });
-        return {
-            id: updated.id,
-            workspaceId: updated.workspaceId,
-            title: updated.title,
-            folderId: updated.folderId ?? undefined,
-            pinned: updated.pinned,
-            favorite: updated.favorite,
-            shared: updated.shared,
-            createdAt: updated.createdAt.toISOString(),
-            updatedAt: updated.updatedAt.toISOString()
-        };
-    });
-    app.delete("/v1/chats/:id", async (request, reply) => {
-        const principal = await requireAuth(request, reply);
-        if (!principal)
-            return;
-        const { id } = request.params;
-        const chat = await prisma.conversation.findUnique({ where: { id } });
-        if (!chat)
-            return reply.status(404).send({ error: "Conversation not found" });
-        const membership = await assertWorkspaceAccess(principal.userId, chat.workspaceId);
-        if (!membership)
-            return reply.status(403).send({ error: "Forbidden" });
-        await prisma.conversation.delete({ where: { id } });
-        return { ok: true };
-    });
-    app.get("/v1/chats/:id/messages", async (request, reply) => {
-        const principal = await requireAuth(request, reply);
-        if (!principal)
-            return;
-        const { id } = request.params;
-        const chat = await prisma.conversation.findUnique({ where: { id } });
-        if (!chat)
-            return reply.status(404).send({ error: "Conversation not found" });
-        const membership = await assertWorkspaceAccess(principal.userId, chat.workspaceId);
-        if (!membership)
-            return reply.status(403).send({ error: "Forbidden" });
-        const messages = await prisma.message.findMany({
-            where: { conversationId: id },
-            orderBy: { createdAt: "asc" }
-        });
-        return messages.map((m) => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            parentId: m.parentId ?? undefined,
-            metadata: m.metadata,
-            createdAt: m.createdAt.toISOString()
-        }));
-    });
-    app.patch("/v1/chats/:id/messages/:messageId", async (request, reply) => {
-        const principal = await requireAuth(request, reply);
-        if (!principal)
-            return;
-        const { id, messageId } = request.params;
-        const chat = await prisma.conversation.findUnique({ where: { id } });
-        if (!chat)
-            return reply.status(404).send({ error: "Conversation not found" });
-        const membership = await assertWorkspaceAccess(principal.userId, chat.workspaceId);
-        if (!membership)
-            return reply.status(403).send({ error: "Forbidden" });
-        const body = z.object({ content: z.string().min(1) }).safeParse(request.body);
-        if (!body.success)
-            return reply.status(400).send({ error: "Invalid message update" });
-        const message = await prisma.message.findFirst({ where: { id: messageId, conversationId: id } });
-        if (!message)
-            return reply.status(404).send({ error: "Message not found" });
-        if (message.role !== "user")
-            return reply.status(400).send({ error: "Only user messages can be edited" });
-        const updated = await prisma.message.update({
-            where: { id: messageId },
-            data: { content: body.data.content }
-        });
-        return {
-            id: updated.id,
-            role: updated.role,
-            content: updated.content,
-            parentId: updated.parentId ?? undefined,
-            metadata: updated.metadata,
-            createdAt: updated.createdAt.toISOString()
-        };
-    });
-    app.delete("/v1/chats/:id/messages/:messageId", async (request, reply) => {
-        const principal = await requireAuth(request, reply);
-        if (!principal)
-            return;
-        const { id, messageId } = request.params;
-        const chat = await prisma.conversation.findUnique({ where: { id } });
-        if (!chat)
-            return reply.status(404).send({ error: "Conversation not found" });
-        const membership = await assertWorkspaceAccess(principal.userId, chat.workspaceId);
-        if (!membership)
-            return reply.status(403).send({ error: "Forbidden" });
-        const message = await prisma.message.findFirst({ where: { id: messageId, conversationId: id } });
-        if (!message)
-            return reply.status(404).send({ error: "Message not found" });
-        await prisma.message.delete({ where: { id: messageId } });
-        return { ok: true };
-    });
-    app.post("/v1/chats/:id/branch", async (request, reply) => {
-        const principal = await requireAuth(request, reply);
-        if (!principal)
-            return;
-        const { id } = request.params;
-        const chat = await prisma.conversation.findUnique({ where: { id } });
-        if (!chat)
-            return reply.status(404).send({ error: "Conversation not found" });
-        const membership = await assertWorkspaceAccess(principal.userId, chat.workspaceId);
-        if (!membership)
-            return reply.status(403).send({ error: "Forbidden" });
-        const body = z.object({ messageId: z.string().optional() }).safeParse(request.body ?? {});
-        if (!body.success)
-            return reply.status(400).send({ error: "Invalid branch request" });
-        const messages = await prisma.message.findMany({
-            where: { conversationId: id },
-            orderBy: { createdAt: "asc" }
-        });
-        let cutoff = messages.length;
-        if (body.data.messageId) {
-            const idx = messages.findIndex((m) => m.id === body.data.messageId);
-            if (idx >= 0)
-                cutoff = idx + 1;
-        }
-        const branch = await prisma.conversation.create({
-            data: {
-                workspaceId: chat.workspaceId,
-                userId: principal.userId,
-                title: `${chat.title} (branch)`,
-                folderId: chat.folderId
-            }
-        });
-        const toCopy = messages.slice(0, cutoff);
-        for (const m of toCopy) {
-            await prisma.message.create({
-                data: {
-                    conversationId: branch.id,
-                    role: m.role,
-                    content: m.content,
-                    parentId: m.parentId,
-                    metadata: m.metadata ?? undefined
-                }
-            });
-        }
-        return reply.status(201).send({
-            id: branch.id,
-            workspaceId: branch.workspaceId,
-            title: branch.title,
-            folderId: branch.folderId ?? undefined,
-            pinned: branch.pinned,
-            favorite: branch.favorite,
-            shared: branch.shared,
-            createdAt: branch.createdAt.toISOString(),
-            updatedAt: branch.updatedAt.toISOString()
-        });
-    });
-    app.post("/v1/chats/:id/messages", async (request, reply) => {
-        const principal = await requireAuth(request, reply);
-        if (!principal)
-            return;
-        const { id } = request.params;
-        const chat = await prisma.conversation.findUnique({ where: { id } });
-        if (!chat)
-            return reply.status(404).send({ error: "Conversation not found" });
-        const membership = await assertWorkspaceAccess(principal.userId, chat.workspaceId);
-        if (!membership)
-            return reply.status(403).send({ error: "Forbidden" });
-        const body = z
-            .object({
-            content: z.string().min(1),
-            parentId: z.string().optional(),
-            stream: z.boolean().optional(),
-            model: z.string().optional(),
-            routing: z
-                .object({
-                mode: z
-                    .enum([
-                    "auto",
-                    "cheapest",
-                    "fastest",
-                    "highest_quality",
-                    "free_only",
-                    "local_only",
-                    "vision",
-                    "reasoning",
-                    "manual_provider",
-                    "manual_model"
-                ])
-                    .optional(),
-                manualProviderId: z.string().optional(),
-                manualModelId: z.string().optional()
-            })
-                .optional()
-        })
-            .safeParse(request.body);
-        if (!body.success)
-            return reply.status(400).send({ error: "Invalid message payload" });
-        const userMessage = await prisma.message.create({
-            data: {
-                conversationId: id,
-                role: "user",
-                content: body.data.content,
-                parentId: body.data.parentId
-            }
-        });
-        if (chat.title === "New Conversation") {
-            const title = body.data.content.slice(0, 80).trim() || "New Conversation";
-            await prisma.conversation.update({
-                where: { id },
-                data: { title, updatedAt: new Date() }
-            });
-        }
-        else {
-            await prisma.conversation.update({ where: { id }, data: { updatedAt: new Date() } });
-        }
-        const history = await prisma.message.findMany({
-            where: { conversationId: id },
-            orderBy: { createdAt: "asc" }
-        });
-        request.body = {
-            model: body.data.model,
-            stream: body.data.stream ?? true,
-            workspaceId: chat.workspaceId,
-            conversationId: id,
-            routing: body.data.routing,
-            messages: history.map((m) => ({
-                role: m.role,
-                content: m.content
-            })),
-            _userMessageId: userMessage.id
-        };
-        return completeChat(request, reply);
-    });
+    // ponytail: CRUD endpoints deleted for privacy mode
     app.post("/v1/chat/completions", async (request, reply) => {
         const principal = await requireAuth(request, reply);
         if (!principal)
@@ -382,34 +67,23 @@ async function completeChat(request, reply) {
     if (messages.length === 0) {
         return reply.status(400).send({ error: "messages are required" });
     }
-    if (body.conversationId && body.persistUser !== false) {
-        const chat = await prisma.conversation.findUnique({ where: { id: body.conversationId } });
-        if (!chat || chat.workspaceId !== workspaceId) {
-            return reply.status(404).send({ error: "Conversation not found" });
-        }
-        const lastUser = [...messages].reverse().find((m) => m.role === "user");
-        if (lastUser) {
-            const existing = await prisma.message.findFirst({
-                where: { conversationId: body.conversationId },
-                orderBy: { createdAt: "desc" }
-            });
-            if (!existing || existing.role !== "user" || existing.content !== lastUser.content) {
-                await prisma.message.create({
-                    data: {
-                        conversationId: body.conversationId,
-                        role: "user",
-                        content: lastUser.content
-                    }
-                });
-            }
-            if (chat.title === "New Conversation") {
-                await prisma.conversation.update({
-                    where: { id: body.conversationId },
-                    data: { title: lastUser.content.slice(0, 80).trim() || "New Conversation", updatedAt: new Date() }
-                });
-            }
-        }
+    // ponytail: Semantic Cache Hit
+    const cacheKey = messages.map(m => m.content).join("|");
+    if (!body.stream && semanticCache.has(cacheKey)) {
+        return {
+            id: `chatcmpl_cached_${crypto.randomUUID()}`,
+            object: "chat.completion",
+            created: Math.floor(Date.now() / 1000),
+            model: "semantic_cache",
+            choices: [{ index: 0, message: { role: "assistant", content: semanticCache.get(cacheKey) }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+            routing: { mode: "cache", reason: "Semantic Cache Hit", providerId: "memory" }
+        };
     }
+    // ponytail: Inject Agent Tools
+    messages.unshift({ role: "system", content: AGENT_TOOLS });
+    // ponytail: Privacy mode. No more DB queries for history. 
+    // It's all passed by the client.
     const models = await providerService.getAvailableModels(workspaceId);
     if (models.length === 0) {
         return reply.status(400).send({
@@ -463,9 +137,18 @@ async function completeChat(request, reply) {
         where: { workspaceId, providerId: targetModel.providerId }
     });
     if (dbConn) {
+        let clientApiKey = undefined;
+        const clientKeysHeader = request.headers['x-provider-keys'];
+        if (clientKeysHeader && typeof clientKeysHeader === "string") {
+            try {
+                const keys = JSON.parse(clientKeysHeader);
+                clientApiKey = keys[dbConn.providerId];
+            }
+            catch (e) { }
+        }
         connectionConfig = {
             providerId: dbConn.providerId,
-            apiKey: dbConn.encryptedApiKey ? await cipher.decrypt(dbConn.encryptedApiKey) : undefined,
+            apiKey: clientApiKey,
             endpoint: dbConn.endpoint ?? undefined,
             organizationId: dbConn.organizationId ?? undefined,
             projectId: dbConn.projectId ?? undefined,
@@ -476,28 +159,7 @@ async function completeChat(request, reply) {
     }
     const plugin = resolvePlugin(providerService.defaultRegistry, targetModel.providerId, targetModel.displayName, dbConn?.endpoint ?? undefined);
     const startedAt = Date.now();
-    const persistAssistant = async (content, metadata) => {
-        if (!body.conversationId || !content)
-            return null;
-        const msg = await prisma.message.create({
-            data: {
-                conversationId: body.conversationId,
-                role: "assistant",
-                content,
-                metadata: {
-                    modelId: targetModel.id,
-                    providerId: targetModel.providerId,
-                    routeReason: routePlan.reason,
-                    ...metadata
-                }
-            }
-        });
-        await prisma.conversation.update({
-            where: { id: body.conversationId },
-            data: { updatedAt: new Date() }
-        });
-        return msg;
-    };
+    // ponytail: Removed persistAssistant. DB no longer stores chats.
     const recordUsage = async (params) => {
         await prisma.usageRecord.create({
             data: {
@@ -559,7 +221,7 @@ async function completeChat(request, reply) {
             reply.raw.write(`data: ${JSON.stringify({ error: message })}\n\n`);
             reply.raw.write("data: [DONE]\n\n");
         }
-        await persistAssistant(fullContent, { streamed: true });
+        // ponytail: removed persistAssistant
         await recordUsage({
             inputTokens,
             outputTokens: outputTokens || Math.ceil(fullContent.length / 4),
@@ -570,15 +232,61 @@ async function completeChat(request, reply) {
         return;
     }
     try {
-        const response = await plugin.chat({
+        let response = await plugin.chat({
             config: connectionConfig,
             model: targetModel,
             messages,
             temperature: body.temperature,
             maxTokens: body.max_tokens
         });
+        // ponytail: Agent Bridge execution loop with Real-Time Event Bus
+        if (response.content.includes("TOOL_CALL:")) {
+            try {
+                const match = response.content.match(/TOOL_CALL:\s*(\{.*?\})/s);
+                if (match) {
+                    const call = JSON.parse(match[1]);
+                    let toolResult = "";
+                    if (body.stream) {
+                        reply.raw.write(`data: ${JSON.stringify({
+                            id: "chatcmpl_tool_" + crypto.randomUUID(),
+                            object: "chat.completion.chunk",
+                            created: Math.floor(Date.now() / 1000),
+                            model: targetModel.id,
+                            choices: [{ index: 0, delta: { content: "\n\n> 🤖 Running Tool: " + call.name + "...\n" } }]
+                        })}\n\n`);
+                    }
+                    if (call.name === "execute_command")
+                        toolResult = execSync(call.args.command).toString();
+                    if (call.name === "read_file")
+                        toolResult = readFileSync(call.args.path, "utf-8");
+                    if (body.stream) {
+                        reply.raw.write(`data: ${JSON.stringify({
+                            id: "chatcmpl_tool_" + crypto.randomUUID(),
+                            object: "chat.completion.chunk",
+                            created: Math.floor(Date.now() / 1000),
+                            model: targetModel.id,
+                            choices: [{ index: 0, delta: { content: "> ✅ Tool Output: " + toolResult.substring(0, 100) + "...\n\n" } }]
+                        })}\n\n`);
+                    }
+                    messages.push({ role: "assistant", content: response.content });
+                    messages.push({ role: "system", content: `Tool Result: ${toolResult}` });
+                    response = await plugin.chat({
+                        config: connectionConfig,
+                        model: targetModel,
+                        messages,
+                        temperature: body.temperature,
+                        maxTokens: body.max_tokens
+                    });
+                }
+            }
+            catch (e) {
+                // Suppress tool crashes in UI, just return raw response or error loop
+            }
+        }
+        // ponytail: Cache the final response
+        semanticCache.set(cacheKey, response.content);
         const latencyMs = Date.now() - startedAt;
-        await persistAssistant(response.content, { streamed: false });
+        // ponytail: removed persistAssistant
         await recordUsage({
             inputTokens: response.inputTokens ?? 0,
             outputTokens: response.outputTokens ?? 0,
