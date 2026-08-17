@@ -26,6 +26,7 @@ const AGENT_TOOLS = `
 4. append_file(path: string, content: string) - Appends to a native file.
 5. replace_file_content(path: string, target: string, replacement: string) - Replaces exact target string with replacement in a file.
 6. list_dir(path: string) - Lists contents of a directory.
+7. spawn_subagent(role: string, prompt: string) - Spawns a background agent with the same tools to complete a sub-task. Returns the final result.
 
 Format: TOOL_CALL: {"name": "execute_command", "args": {"command": "ls"}}
 
@@ -228,6 +229,63 @@ async function completeChat(request: FastifyRequest, reply: FastifyReply) {
     });
   };
 
+  const executeTool = async (call: any): Promise<string> => {
+    if (call.name === "execute_command") {
+      return execSync(call.args.command, { encoding: 'utf-8', maxBuffer: 1024 * 1024 * 10 });
+    }
+    if (call.name === "read_file") {
+      return readFileSync(call.args.path, "utf-8");
+    }
+    if (call.name === "write_file") {
+      writeFileSync(call.args.path, call.args.content, "utf-8");
+      return "File written successfully.";
+    }
+    if (call.name === "append_file") {
+      let current = readFileSync(call.args.path, "utf-8");
+      writeFileSync(call.args.path, current + "\n" + call.args.content, "utf-8");
+      return "Content appended successfully.";
+    }
+    if (call.name === "replace_file_content") {
+      let current = readFileSync(call.args.path, "utf-8");
+      current = current.replace(call.args.target, call.args.replacement);
+      writeFileSync(call.args.path, current, "utf-8");
+      return "Content replaced successfully.";
+    }
+    if (call.name === "list_dir") {
+      return readdirSync(call.args.path).join("\n");
+    }
+    if (call.name === "spawn_subagent") {
+      let subMessages = [
+        { role: "system", content: AGENT_TOOLS + "\n\nYou are a subagent. Your role is: " + call.args.role },
+        { role: "user", content: call.args.prompt }
+      ] as any;
+      const runSubagent = async (msgs: any, depth = 0): Promise<string> => {
+        if (depth > 5) return "Error: Max subagent recursion depth reached.";
+        const res = await plugin.chat({ config: connectionConfig, model: targetModel, messages: msgs, temperature: 0.1 });
+        const content = res.content;
+        if (content.includes("TOOL_CALL:")) {
+          const m = content.match(/TOOL_CALL:\s*(\{.*?\})/s);
+          if (m) {
+            try {
+              const c = JSON.parse(m[1]);
+              const tRes = await executeTool(c);
+              msgs.push({ role: "assistant", content });
+              msgs.push({ role: "system", content: "Tool Result:\n" + tRes });
+              return runSubagent(msgs, depth + 1);
+            } catch (e) {
+              msgs.push({ role: "assistant", content });
+              msgs.push({ role: "system", content: "Tool Error: " + String(e) });
+              return runSubagent(msgs, depth + 1);
+            }
+          }
+        }
+        return content;
+      };
+      return await runSubagent(subMessages);
+    }
+    throw new Error("Unknown tool: " + call.name);
+  };
+
   if (body.stream && plugin.streamChat) {
     reply.hijack();
     reply.raw.writeHead(200, {
@@ -277,36 +335,11 @@ async function completeChat(request: FastifyRequest, reply: FastifyReply) {
             if (match) {
               try {
                 const call = JSON.parse(match[1]);
-                let toolResult = "";
-                
                 reply.raw.write(`data: ${JSON.stringify({
                   choices: [{ delta: { content: "\n\n> 🤖 Running Tool: " + call.name + "...\n" } }]
                 })}\n\n`);
 
-                if (call.name === "execute_command") {
-                  toolResult = execSync(call.args.command, { encoding: 'utf-8', maxBuffer: 1024 * 1024 * 10 });
-                }
-                if (call.name === "read_file") {
-                  toolResult = readFileSync(call.args.path, "utf-8");
-                }
-                if (call.name === "write_file") {
-                  writeFileSync(call.args.path, call.args.content, "utf-8");
-                  toolResult = "File written successfully.";
-                }
-                if (call.name === "append_file") {
-                  let current = readFileSync(call.args.path, "utf-8");
-                  writeFileSync(call.args.path, current + "\n" + call.args.content, "utf-8");
-                  toolResult = "Content appended successfully.";
-                }
-                if (call.name === "replace_file_content") {
-                  let current = readFileSync(call.args.path, "utf-8");
-                  current = current.replace(call.args.target, call.args.replacement);
-                  writeFileSync(call.args.path, current, "utf-8");
-                  toolResult = "Content replaced successfully.";
-                }
-                if (call.name === "list_dir") {
-                  toolResult = readdirSync(call.args.path).join("\n");
-                }
+                const toolResult = await executeTool(call);
                 
                 reply.raw.write(`data: ${JSON.stringify({
                   choices: [{ delta: { content: "> ✅ Tool Output received.\n\n" } }]
@@ -361,7 +394,7 @@ async function completeChat(request: FastifyRequest, reply: FastifyReply) {
         const match = response.content.match(/TOOL_CALL:\s*(\{.*?\})/s);
         if (match) {
           const call = JSON.parse(match[1]);
-          let toolResult = "";
+          const toolResult = await executeTool(call);
           
           if (body.stream) {
             reply.raw.write(`data: ${JSON.stringify({
@@ -369,38 +402,7 @@ async function completeChat(request: FastifyRequest, reply: FastifyReply) {
               object: "chat.completion.chunk",
               created: Math.floor(Date.now() / 1000),
               model: targetModel.id,
-              choices: [{ index: 0, delta: { content: "\n\n> 🤖 Running Tool: " + call.name + "...\n" } }]
-            })}\n\n`);
-          }
-
-          if (call.name === "execute_command") toolResult = execSync(call.args.command, { encoding: 'utf-8', maxBuffer: 1024 * 1024 * 10 });
-          if (call.name === "read_file") toolResult = readFileSync(call.args.path, "utf-8");
-          if (call.name === "write_file") {
-            writeFileSync(call.args.path, call.args.content, "utf-8");
-            toolResult = "File written successfully.";
-          }
-          if (call.name === "append_file") {
-            let current = readFileSync(call.args.path, "utf-8");
-            writeFileSync(call.args.path, current + "\n" + call.args.content, "utf-8");
-            toolResult = "Content appended successfully.";
-          }
-          if (call.name === "replace_file_content") {
-            let current = readFileSync(call.args.path, "utf-8");
-            current = current.replace(call.args.target, call.args.replacement);
-            writeFileSync(call.args.path, current, "utf-8");
-            toolResult = "Content replaced successfully.";
-          }
-          if (call.name === "list_dir") {
-            toolResult = readdirSync(call.args.path).join("\n");
-          }
-          
-          if (body.stream) {
-            reply.raw.write(`data: ${JSON.stringify({
-              id: "chatcmpl_tool_" + crypto.randomUUID(),
-              object: "chat.completion.chunk",
-              created: Math.floor(Date.now() / 1000),
-              model: targetModel.id,
-              choices: [{ index: 0, delta: { content: "> ✅ Tool Output: " + toolResult.substring(0, 100) + "...\n\n" } }]
+              choices: [{ index: 0, delta: { content: "> ✅ Tool Output received.\n\n" } }]
             })}\n\n`);
           }
           
