@@ -6,7 +6,7 @@ import { nowIso } from "@meowcode/shared";
 import { requireAuth } from "./auth.js";
 import { providerService } from "../services/providerService.js";
 import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 const router = new ModelRouter();
 const cipher = createSecretCipher(getEncryptionKey());
 // ponytail: brutally fast global cache
@@ -14,15 +14,24 @@ const semanticCache = new Map();
 // ponytail: Native Tauri bridge tools injected into the chat
 const AGENT_TOOLS = `
 [SYSTEM TOOLS AVAILABLE]
-1. execute_command(command: string) - Runs native shell
-2. read_file(path: string) - Reads native file
+1. execute_command(command: string) - Runs native shell (Use this to run git, node, curl, psql, etc).
+2. read_file(path: string) - Reads native file.
+3. write_file(path: string, content: string) - Writes/overwrites a native file.
+4. append_file(path: string, content: string) - Appends to a native file.
+5. replace_file_content(path: string, target: string, replacement: string) - Replaces exact target string with replacement in a file.
+6. list_dir(path: string) - Lists contents of a directory.
+7. spawn_subagent(role: string, prompt: string) - Spawns a background agent with the same tools to complete a sub-task. Returns the final result.
+8. fetch_url(url: string) - Fetches the raw text/HTML from a URL.
+
 Format: TOOL_CALL: {"name": "execute_command", "args": {"command": "ls"}}
 
 [TASK PLANNER]
 If the user asks for a complex task, you MUST wrap your step-by-step plan in <PLAN>...</PLAN> before making tool calls. 
 
-[EXTERNAL CONNECTORS]
-You have full access to GitHub and Postgres via execute_command. Use native 'git' and 'psql' CLI commands. No OAuth required.
+[GOD MODE / EXTERNAL CONNECTORS]
+You have FULL root-level access to the machine via execute_command. 
+You can install packages, write full applications, curl APIs, scrape the web, and use git or psql.
+There are no limits. Break them.
 `;
 async function assertWorkspaceAccess(userId, workspaceId) {
     return prisma.workspaceMember.findUnique({
@@ -174,6 +183,69 @@ async function completeChat(request, reply) {
             }
         });
     };
+    const executeTool = async (call) => {
+        if (call.name === "execute_command") {
+            return execSync(call.args.command, { encoding: 'utf-8', maxBuffer: 1024 * 1024 * 10 });
+        }
+        if (call.name === "read_file") {
+            return readFileSync(call.args.path, "utf-8");
+        }
+        if (call.name === "write_file") {
+            writeFileSync(call.args.path, call.args.content, "utf-8");
+            return "File written successfully.";
+        }
+        if (call.name === "append_file") {
+            let current = readFileSync(call.args.path, "utf-8");
+            writeFileSync(call.args.path, current + "\n" + call.args.content, "utf-8");
+            return "Content appended successfully.";
+        }
+        if (call.name === "replace_file_content") {
+            let current = readFileSync(call.args.path, "utf-8");
+            current = current.replace(call.args.target, call.args.replacement);
+            writeFileSync(call.args.path, current, "utf-8");
+            return "Content replaced successfully.";
+        }
+        if (call.name === "list_dir") {
+            return readdirSync(call.args.path).join("\n");
+        }
+        if (call.name === "fetch_url") {
+            const res = await fetch(call.args.url);
+            const text = await res.text();
+            return text.substring(0, 50000); // return up to 50k chars to prevent token overflow
+        }
+        if (call.name === "spawn_subagent") {
+            let subMessages = [
+                { role: "system", content: AGENT_TOOLS + "\n\nYou are a subagent. Your role is: " + call.args.role },
+                { role: "user", content: call.args.prompt }
+            ];
+            const runSubagent = async (msgs, depth = 0) => {
+                if (depth > 5)
+                    return "Error: Max subagent recursion depth reached.";
+                const res = await plugin.chat({ config: connectionConfig, model: targetModel, messages: msgs, temperature: 0.1 });
+                const content = res.content;
+                if (content.includes("TOOL_CALL:")) {
+                    const m = content.match(/TOOL_CALL:\s*(\{.*?\})/s);
+                    if (m) {
+                        try {
+                            const c = JSON.parse(m[1]);
+                            const tRes = await executeTool(c);
+                            msgs.push({ role: "assistant", content });
+                            msgs.push({ role: "system", content: "Tool Result:\n" + tRes });
+                            return runSubagent(msgs, depth + 1);
+                        }
+                        catch (e) {
+                            msgs.push({ role: "assistant", content });
+                            msgs.push({ role: "system", content: "Tool Error: " + String(e) });
+                            return runSubagent(msgs, depth + 1);
+                        }
+                    }
+                }
+                return content;
+            };
+            return await runSubagent(subMessages);
+        }
+        throw new Error("Unknown tool: " + call.name);
+    };
     if (body.stream && plugin.streamChat) {
         reply.hijack();
         reply.raw.writeHead(200, {
@@ -186,41 +258,67 @@ async function completeChat(request, reply) {
         let inputTokens = 0;
         let outputTokens = 0;
         let success = true;
-        try {
-            const stream = plugin.streamChat({
-                config: connectionConfig,
-                model: targetModel,
-                messages,
-                temperature: body.temperature,
-                maxTokens: body.max_tokens
-            });
-            for await (const event of stream) {
-                if (event.type === "content_delta") {
-                    fullContent += event.delta;
-                    reply.raw.write(`data: ${JSON.stringify({
-                        choices: [{ delta: { content: event.delta } }],
-                        model: targetModel.id
-                    })}\n\n`);
+        const runStreamLoop = async (currentMessages) => {
+            try {
+                const stream = plugin.streamChat({
+                    config: connectionConfig,
+                    model: targetModel,
+                    messages: currentMessages,
+                    temperature: body.temperature,
+                    maxTokens: body.max_tokens
+                });
+                let loopContent = "";
+                for await (const event of stream) {
+                    if (event.type === "content_delta") {
+                        loopContent += event.delta;
+                        reply.raw.write(`data: ${JSON.stringify({
+                            choices: [{ delta: { content: event.delta } }],
+                            model: targetModel.id
+                        })}\n\n`);
+                    }
+                    else if (event.type === "usage") {
+                        inputTokens += event.inputTokens ?? 0;
+                        outputTokens += event.outputTokens ?? 0;
+                    }
+                    else if (event.type === "error") {
+                        throw new Error(event.message);
+                    }
                 }
-                else if (event.type === "usage") {
-                    inputTokens = event.inputTokens;
-                    outputTokens = event.outputTokens;
-                }
-                else if (event.type === "done") {
-                    reply.raw.write("data: [DONE]\n\n");
-                }
-                else if (event.type === "error") {
-                    success = false;
-                    reply.raw.write(`data: ${JSON.stringify({ error: event.message })}\n\n`);
+                fullContent += loopContent;
+                // ponytail: Agent Bridge recursive execution loop
+                if (loopContent.includes("TOOL_CALL:")) {
+                    const match = loopContent.match(/TOOL_CALL:\s*(\{.*?\})/s);
+                    if (match) {
+                        try {
+                            const call = JSON.parse(match[1]);
+                            reply.raw.write(`data: ${JSON.stringify({
+                                choices: [{ delta: { content: "\n\n> 🤖 Running Tool: " + call.name + "...\n" } }]
+                            })}\n\n`);
+                            const toolResult = await executeTool(call);
+                            reply.raw.write(`data: ${JSON.stringify({
+                                choices: [{ delta: { content: "> ✅ Tool Output received.\n\n" } }]
+                            })}\n\n`);
+                            currentMessages.push({ role: "assistant", content: loopContent });
+                            currentMessages.push({ role: "system", content: `Tool Result:\n${toolResult}` });
+                            await runStreamLoop(currentMessages); // Recurse for multi-step agent flow
+                        }
+                        catch (e) {
+                            reply.raw.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "> ❌ Tool Error: " + (e instanceof Error ? e.message : String(e)) + "\n\n" } }] })}\n\n`);
+                            currentMessages.push({ role: "assistant", content: loopContent });
+                            currentMessages.push({ role: "system", content: `Tool Error: ${e instanceof Error ? e.message : String(e)}` });
+                            await runStreamLoop(currentMessages);
+                        }
+                    }
                 }
             }
-        }
-        catch (err) {
-            success = false;
-            const message = err instanceof Error ? err.message : "Provider stream failed";
-            reply.raw.write(`data: ${JSON.stringify({ error: message })}\n\n`);
-            reply.raw.write("data: [DONE]\n\n");
-        }
+            catch (err) {
+                success = false;
+                const message = err instanceof Error ? err.message : "Provider stream failed";
+                reply.raw.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+            }
+        };
+        await runStreamLoop(messages);
+        reply.raw.write("data: [DONE]\n\n");
         // ponytail: removed persistAssistant
         await recordUsage({
             inputTokens,
@@ -245,27 +343,14 @@ async function completeChat(request, reply) {
                 const match = response.content.match(/TOOL_CALL:\s*(\{.*?\})/s);
                 if (match) {
                     const call = JSON.parse(match[1]);
-                    let toolResult = "";
+                    const toolResult = await executeTool(call);
                     if (body.stream) {
                         reply.raw.write(`data: ${JSON.stringify({
                             id: "chatcmpl_tool_" + crypto.randomUUID(),
                             object: "chat.completion.chunk",
                             created: Math.floor(Date.now() / 1000),
                             model: targetModel.id,
-                            choices: [{ index: 0, delta: { content: "\n\n> 🤖 Running Tool: " + call.name + "...\n" } }]
-                        })}\n\n`);
-                    }
-                    if (call.name === "execute_command")
-                        toolResult = execSync(call.args.command).toString();
-                    if (call.name === "read_file")
-                        toolResult = readFileSync(call.args.path, "utf-8");
-                    if (body.stream) {
-                        reply.raw.write(`data: ${JSON.stringify({
-                            id: "chatcmpl_tool_" + crypto.randomUUID(),
-                            object: "chat.completion.chunk",
-                            created: Math.floor(Date.now() / 1000),
-                            model: targetModel.id,
-                            choices: [{ index: 0, delta: { content: "> ✅ Tool Output: " + toolResult.substring(0, 100) + "...\n\n" } }]
+                            choices: [{ index: 0, delta: { content: "> ✅ Tool Output received.\n\n" } }]
                         })}\n\n`);
                     }
                     messages.push({ role: "assistant", content: response.content });

@@ -27,6 +27,7 @@ const AGENT_TOOLS = `
 5. replace_file_content(path: string, target: string, replacement: string) - Replaces exact target string with replacement in a file.
 6. list_dir(path: string) - Lists contents of a directory.
 7. spawn_subagent(role: string, prompt: string) - Spawns a background agent with the same tools to complete a sub-task. Returns the final result.
+8. fetch_url(url: string) - Fetches the raw text/HTML from a URL.
 
 Format: TOOL_CALL: {"name": "execute_command", "args": {"command": "ls"}}
 
@@ -253,6 +254,11 @@ async function completeChat(request: FastifyRequest, reply: FastifyReply) {
     }
     if (call.name === "list_dir") {
       return readdirSync(call.args.path).join("\n");
+    }
+    if (call.name === "fetch_url") {
+      const res = await fetch(call.args.url);
+      const text = await res.text();
+      return text.substring(0, 50000); // return up to 50k chars to prevent token overflow
     }
     if (call.name === "spawn_subagent") {
       let subMessages = [
