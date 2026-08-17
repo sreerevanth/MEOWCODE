@@ -29,7 +29,7 @@ Every day, builders jump between five different AI tabs — one for coding, one 
 
 ---
 
-## 🚀 God-Tier Features (Showcase Ready)
+## 🚀 God-Tier Features
 
 Meow Code has evolved far beyond a standard AI wrapper. It is a fully autonomous, sandboxed, multi-agent operating system.
 
@@ -41,7 +41,7 @@ When you assign Meow a massive task, it doesn't just try to answer in one go. Th
 
 ### 2. ⚡ Live Artifact Rendering (Interactive Previews)
 Why copy and paste code when you can see it? Meow intercepts any generated `HTML` or `SVG` block and provides a **Live Preview** toggle button.
-- **Sandboxed Execution**: Code runs inside a securely constrained `iframe` (`sandbox="allow-scripts allow-forms allow-same-origin"`).
+- **Sandboxed Execution**: Code runs inside a securely constrained `iframe` (`sandbox="allow-scripts allow-forms allow-same-origin allow-popups"`).
 - **Rapid Prototyping**: Tell Meow to *"Build a React-style tic-tac-toe game in a single HTML file"* and literally play it inside the chat UI seconds later.
 
 ### 3. 🌐 Native Internet & RAG (`fetch_url`)
@@ -58,40 +58,34 @@ By typing `/plan` before your prompt, you can force the AI into an architectural
 
 ---
 
-## 🏗️ 100% Stateless Privacy Architecture
+## 🏗️ The Agent Bridge (Recursive State Machine)
 
-Most AI platforms store your API keys and chat logs in their cloud databases. **Meow Code does not.**
+The true power of Meow Code lies in the backend **Agent Bridge**. Instead of just returning text, the Fastify server intercepts JSON tool commands and acts as an autonomous execution engine on your local machine.
 
 ```mermaid
-sequenceDiagram
-    participant User
-    participant IndexedDB
-    participant Client
-    participant MeowServer
-    participant AIProvider
+stateDiagram-v2
+    [*] --> ProcessRequest
+    ProcessRequest --> LLM_Call : Send Prompt & Tools
+    LLM_Call --> ParseResponse : Stream generated
+    
+    ParseResponse --> TextOutput : No TOOL_CALL found
+    ParseResponse --> ToolExecution : TOOL_CALL intercepted
+    
+    ToolExecution --> ExecCommand : run terminal cmd
+    ToolExecution --> FileSystem : read/write files
+    ToolExecution --> SubAgent : spawn worker agent
+    ToolExecution --> WebScrape : fetch_url
 
-    User->>IndexedDB: Securely save Provider API Keys (Local Only)
-    Client->>IndexedDB: Retrieve Keys
-    Client->>MeowServer: Send Chat + `x-provider-keys` header
-    Note over MeowServer: 100% Stateless. No DB.<br/>Parses header in-memory.
-    MeowServer->>AIProvider: Execute Query with intercepted Keys
-    AIProvider-->>MeowServer: Stream Response
-    MeowServer-->>Client: Stream Response + Telemetry
+    ExecCommand --> AppendHistory : Result captured
+    FileSystem --> AppendHistory
+    SubAgent --> AppendHistory
+    WebScrape --> AppendHistory
+    
+    AppendHistory --> LLM_Call : Re-invoke LLM with new context
+    TextOutput --> [*] : Send Final Stream to UI
 ```
 
-**Privacy Guarantees:**
-- 🚫 **No Accounts Required**: No Gmail, OAuth, or passwords.
-- 🚫 **No Server-Side Key Storage**: Your API keys never touch a database.
-- 🚫 **No Persistent Logs**: Chat logs exist locally in your browser memory.
-- ✅ **Edge-Encrypted**: Keys are kept in the browser's **IndexedDB** using `idb-keyval`.
-- ✅ **Stateless Bridge**: The Node.js Fastify backend acts as an ephemeral proxy, decoding the `x-provider-keys` header on the fly.
-
----
-
-## 🛠️ The Agent Bridge (God Mode Tools)
-
-The backend provides the AI with a suite of native filesystem and execution tools. Through recursive `TOOL_CALL` intercepts, the AI operates as a fully autonomous developer on your machine.
-
+### God Mode Tool Reference
 | Tool Identifier | Capability & Security Scope |
 |-----------------|-----------------------------|
 | `execute_command` | Full terminal access. Executes shell commands (npm, git, bash) locally. |
@@ -103,23 +97,58 @@ The backend provides the AI with a suite of native filesystem and execution tool
 | `fetch_url` | Web scraping and documentation ingestion. |
 | `spawn_subagent` | **Parallel background workers** that share the exact same toolset. |
 
-### How the Bridge Works Under the Hood
-1. The AI outputs a block formatted as `TOOL_CALL: {"name": "...", "args": {...}}`.
-2. The Fastify server intercepts the stream, pauses it, and executes the native Node.js function (`execSync`, `readFileSync`, etc).
-3. The server appends the tool's output to the message history.
-4. The server **re-invokes** the AI with the updated history, repeating this recursive loop until the AI stops calling tools and provides a final answer to the user.
+---
+
+## 🔒 100% Stateless Security Architecture
+
+Most AI platforms store your API keys and chat logs in their cloud databases, creating massive Honeypots for hackers. **Meow Code does not.**
+
+### How We Secure Your Data:
+1. **IndexedDB Local Vault**: API Keys (OpenAI, Anthropic) are saved securely in your browser's IndexedDB via `idb-keyval`. They are never passed through URL parameters or `localStorage` (which is highly vulnerable to XSS).
+2. **The `x-provider-keys` Header**: When you send a message, the React frontend injects your API keys into a custom HTTP header.
+3. **The Ephemeral Backend**: The Node.js Fastify server receives the header, decodes the keys in-memory, executes the LLM call, and instantly destroys the memory reference. **There is no database attached to the API.**
+4. **Sandboxed Artifacts**: All generated UI components are rendered inside a heavily restricted `iframe` to prevent malicious code generated by the AI from escaping into the parent DOM.
 
 ---
 
-## ⚙️ Tech Stack & Architecture
+## 📁 Monorepo Structure
 
-Meow Code is built as an `npm workspace` monorepo for maximum modularity.
+Meow Code is built as a highly modular `npm workspace` monorepo.
 
-- **Frontend (Web)**: [Next.js 15](https://nextjs.org/) (App Router), [React 19](https://react.dev/), [Tailwind CSS v4](https://tailwindcss.com/), [Radix UI](https://www.radix-ui.com/) (Headless accessibility).
-- **Backend (API)**: [Fastify](https://fastify.dev/) for ultra-high-performance routing, stream handling, and tool execution.
-- **AI SDK**: `@ai-sdk/core` for seamless multi-provider streaming (Claude, OpenAI, Gemini).
-- **Local Storage**: `idb-keyval` for secure, browser-native IndexedDB credential management.
-- **Styling**: `@meowcode/ui` custom design system (Minimalist, dark-mode native, high-contrast).
+```text
+MEOWCODE/
+├── apps/
+│   ├── api/                 # Fastify backend (Agent Bridge, Orchestrator)
+│   ├── cli/                 # Terminal interface (Coming soon)
+│   └── web/                 # Next.js 15 Frontend (Chat UI, Telemetry, Artifacts)
+├── packages/
+│   ├── auth/                # Stateless Authentication utilities
+│   ├── database/            # Local SQLite schema definitions
+│   ├── providers/           # Multi-LLM SDK wrappers
+│   ├── router/              # AI Model Routing logic
+│   ├── sdk/                 # Internal API definitions
+│   ├── shared/              # Shared TypeScript types
+│   └── ui/                  # Radix-UI + Tailwind component library
+└── package.json
+```
+
+---
+
+## 🎯 Showcase Scenarios
+
+If you are pitching or demonstrating Meow Code, try these exact workflows to showcase its power:
+
+### Scenario A: The Autonomous Developer
+1. **Prompt**: *"Look at the files in `./apps/web/app/components`. Find the `Header.tsx` file and change the background color from black to zinc-900."*
+2. **Watch it work**: You will see the Telemetry UI flash cyan as it calls `list_dir`, then `read_file`, and finally `replace_file_content`. It acts completely autonomously without you writing a single line of code.
+
+### Scenario B: The Live Interactive UI
+1. **Prompt**: *"Write a complete, single-file HTML implementation of Conway's Game of Life. Make it look beautiful with CSS."*
+2. **Watch it work**: Once the AI finishes streaming the code block, click **Live Preview** in the top right of the code block. The game will render and run directly inside your chat window.
+
+### Scenario C: The Advanced Researcher
+1. **Prompt**: *"Use fetch_url to read https://raw.githubusercontent.com/fastify/fastify/main/README.md and summarize their core philosophy."*
+2. **Watch it work**: Meow Code will reach out to the live internet, ingest the massive markdown file, and respond with exact, up-to-date facts.
 
 ---
 
@@ -151,22 +180,13 @@ The Web UI will be available at `http://localhost:3000` and the API layer at `ht
 
 ---
 
-## 🗺️ Roadmap
-
-- **Phase 1 (Web)**: Stateless Architecture, Multi-Agent Bridge, Live Artifacts, Local Key Management. *(Completed)*
-- **Phase 2 (CLI)**: Bring the exact same Orchestrator directly to the terminal for headless operations.
-- **Phase 3 (Desktop)**: Native OS integrations (Electron/Tauri) and persistent local Vector DB memory for Cross-Chat Intelligence.
-- **Phase 4 (Mobile)**: Remote session control, workflow management, and agent monitoring on the go.
-
----
-
 ## 🤝 Contributing & Extending Tools
 
 To add a new tool to the AI's God-Mode arsenal:
 1. Open `apps/api/src/routes/chats.ts`.
 2. Add your tool signature to the `AGENT_TOOLS` system prompt string.
 3. Implement the execution logic inside the `executeTool()` function.
-4. The LLM will automatically understand and utilize your new capability.
+4. The LLM will automatically understand and utilize your new capability natively.
 
 ---
 
