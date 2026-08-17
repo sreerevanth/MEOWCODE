@@ -358,7 +358,7 @@ export function ChatApp(): React.ReactElement {
       if (isPlanMode) {
         nextHistory.push({
           id: `local_sys_${Date.now()}`,
-          role: "system",
+          role: "system" as any,
           content: "TASK PLANNER MODE: The user has requested a complex task breakdown. You must decompose this task into a step-by-step checklist using Markdown task list syntax (- [ ] Step 1). Do not execute any tools or write the actual code yet. Your ONLY output should be the detailed checklist."
         });
       }
