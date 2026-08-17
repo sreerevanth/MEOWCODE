@@ -27,7 +27,11 @@ export function ProviderModal({ open, onClose, client, workspaceId, onConnected 
 
   React.useEffect(() => {
     if (!open || !workspaceId) return;
-    void Promise.all([client.providers(workspaceId), client.providerCatalog()]).then(([connected, cat]) => {
+    void Promise.all([
+      client.providers(workspaceId), 
+      client.providerCatalog(),
+      import("../lib/local-db").then(m => m.getAllApiKeys(workspaceId).catch(() => ({})))
+    ]).then(([connected, cat, localKeys]) => {
       setProviders(connected);
       setCatalog(
         cat.map((c) => ({
@@ -40,7 +44,7 @@ export function ProviderModal({ open, onClose, client, workspaceId, onConnected 
           capabilities: c.capabilities,
           supportsCustomEndpoint: c.supportsCustomEndpoint,
           local: c.local,
-          isConnected: connected.some((p) => p.providerId === c.providerId && p.isConnected)
+          isConnected: !!localKeys[c.providerId]
         }))
       );
     });
@@ -69,7 +73,11 @@ export function ProviderModal({ open, onClose, client, workspaceId, onConnected 
     setStep("syncing");
     try {
       if (apiKey) {
-        await saveApiKey(workspaceId, selected.providerId, apiKey);
+        try {
+          await saveApiKey(workspaceId, selected.providerId, apiKey);
+        } catch (e) {
+          console.warn("Failed to save API key to IndexedDB", e);
+        }
       }
       const added = await client.addProvider({
         workspaceId,

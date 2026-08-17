@@ -230,45 +230,84 @@ async function completeChat(request: FastifyRequest, reply: FastifyReply) {
       "access-control-allow-origin": "*"
     });
 
-    let fullContent = "";
-    let inputTokens = 0;
-    let outputTokens = 0;
-    let success = true;
+      let fullContent = "";
+      let inputTokens = 0;
+      let outputTokens = 0;
+      let success = true;
 
-    try {
-      const stream = plugin.streamChat({
-        config: connectionConfig,
-        model: targetModel,
-        messages,
-        temperature: body.temperature,
-        maxTokens: body.max_tokens
-      });
+      const runStreamLoop = async (currentMessages: typeof messages) => {
+        try {
+          const stream = plugin.streamChat!({
+            config: connectionConfig,
+            model: targetModel,
+            messages: currentMessages,
+            temperature: body.temperature,
+            maxTokens: body.max_tokens
+          });
 
-      for await (const event of stream) {
-        if (event.type === "content_delta") {
-          fullContent += event.delta;
-          reply.raw.write(
-            `data: ${JSON.stringify({
-              choices: [{ delta: { content: event.delta } }],
-              model: targetModel.id
-            })}\n\n`
-          );
-        } else if (event.type === "usage") {
-          inputTokens = event.inputTokens;
-          outputTokens = event.outputTokens;
-        } else if (event.type === "done") {
-          reply.raw.write("data: [DONE]\n\n");
-        } else if (event.type === "error") {
+          let loopContent = "";
+          for await (const event of stream) {
+            if (event.type === "content_delta") {
+              loopContent += event.delta;
+              reply.raw.write(
+                `data: ${JSON.stringify({
+                  choices: [{ delta: { content: event.delta } }],
+                  model: targetModel.id
+                })}\n\n`
+              );
+            } else if (event.type === "usage") {
+              inputTokens += event.inputTokens ?? 0;
+              outputTokens += event.outputTokens ?? 0;
+            } else if (event.type === "error") {
+              throw new Error(event.message);
+            }
+          }
+          fullContent += loopContent;
+
+          // ponytail: Agent Bridge recursive execution loop
+          if (loopContent.includes("TOOL_CALL:")) {
+            const match = loopContent.match(/TOOL_CALL:\s*(\{.*?\})/s);
+            if (match) {
+              try {
+                const call = JSON.parse(match[1]);
+                let toolResult = "";
+                
+                reply.raw.write(`data: ${JSON.stringify({
+                  choices: [{ delta: { content: "\n\n> 🤖 Running Tool: " + call.name + "...\n" } }]
+                })}\n\n`);
+
+                if (call.name === "execute_command") {
+                  toolResult = execSync(call.args.command, { encoding: 'utf-8', maxBuffer: 1024 * 1024 * 10 });
+                }
+                if (call.name === "read_file") {
+                  toolResult = readFileSync(call.args.path, "utf-8");
+                }
+                
+                reply.raw.write(`data: ${JSON.stringify({
+                  choices: [{ delta: { content: "> ✅ Tool Output received.\n\n" } }]
+                })}\n\n`);
+
+                currentMessages.push({ role: "assistant", content: loopContent });
+                currentMessages.push({ role: "system", content: `Tool Result:\n${toolResult}` });
+                
+                await runStreamLoop(currentMessages); // Recurse for multi-step agent flow
+              } catch (e) {
+                reply.raw.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "> ❌ Tool Error: " + (e instanceof Error ? e.message : String(e)) + "\n\n" } }] })}\n\n`);
+                currentMessages.push({ role: "assistant", content: loopContent });
+                currentMessages.push({ role: "system", content: `Tool Error: ${e instanceof Error ? e.message : String(e)}` });
+                await runStreamLoop(currentMessages);
+              }
+            }
+          }
+        } catch (err) {
           success = false;
-          reply.raw.write(`data: ${JSON.stringify({ error: event.message })}\n\n`);
+          const message = err instanceof Error ? err.message : "Provider stream failed";
+          reply.raw.write(`data: ${JSON.stringify({ error: message })}\n\n`);
         }
-      }
-    } catch (err) {
-      success = false;
-      const message = err instanceof Error ? err.message : "Provider stream failed";
-      reply.raw.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+      };
+
+      await runStreamLoop(messages);
       reply.raw.write("data: [DONE]\n\n");
-    }
 
     // ponytail: removed persistAssistant
     await recordUsage({

@@ -146,3 +146,6 @@ export const getAllApiKeys = async (workspaceId: string): Promise<Record<string,
     request.onerror = () => reject(request.error);
   });
 };
+
+export const deleteApiKey = (workspaceId: string, providerId: string) =>
+  tx("apiKeys", "readwrite", (s) => s.delete(`${workspaceId}_${providerId}`));

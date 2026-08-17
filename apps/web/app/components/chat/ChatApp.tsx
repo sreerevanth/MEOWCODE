@@ -343,9 +343,27 @@ export function ChatApp(): React.ReactElement {
         ]);
       }
 
+      let isPlanMode = false;
+      let actualPrompt = userText;
+      if (userText.startsWith("/plan ")) {
+        isPlanMode = true;
+        actualPrompt = userText.slice(6).trim();
+      }
+
       const userMsgId = `local_usr_${Date.now()}`;
       const assistantMsgId = `local_ast_${Date.now()}`;
-      const nextHistory = [...messages, { id: userMsgId, role: "user" as const, content: userText }];
+      
+      let nextHistory = [...messages];
+      
+      if (isPlanMode) {
+        nextHistory.push({
+          id: `local_sys_${Date.now()}`,
+          role: "system",
+          content: "TASK PLANNER MODE: The user has requested a complex task breakdown. You must decompose this task into a step-by-step checklist using Markdown task list syntax (- [ ] Step 1). Do not execute any tools or write the actual code yet. Your ONLY output should be the detailed checklist."
+        });
+      }
+      
+      nextHistory.push({ id: userMsgId, role: "user" as const, content: actualPrompt });
       setMessages([...nextHistory, { id: assistantMsgId, role: "assistant", content: "" }]);
 
       await streamAssistant({ chatId: chatId as string, history: nextHistory, assistantMsgId });
