@@ -4,6 +4,7 @@ import * as React from "react";
 import { Loader2, Plug, Search, X } from "lucide-react";
 import { Button } from "@meowcode/ui";
 import type { MeowClient, ProviderSummary } from "@meowcode/sdk";
+import { saveApiKey } from "../lib/local-db";
 
 interface ProviderModalProps {
   open: boolean;
@@ -67,16 +68,16 @@ export function ProviderModal({ open, onClose, client, workspaceId, onConnected 
     setError(null);
     setStep("syncing");
     try {
+      if (apiKey) {
+        await saveApiKey(workspaceId, selected.providerId, apiKey);
+      }
       const added = await client.addProvider({
         workspaceId,
         providerId: selected.providerId,
         displayName: selected.displayName,
-        apiKey: apiKey || undefined,
         endpoint: endpoint || undefined
       });
-      if (added.id) {
-        await client.syncProvider(added.id);
-      }
+      // Skip syncProvider for stateless mode because we can't sync securely on backend without passing keys in header.
       onConnected();
       onClose();
       setStep("pick");

@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { MeowClient, type AuthUser } from "@meowcode/sdk";
+import { type AuthUser } from "@meowcode/sdk";
+import { LocalMeowClient } from "./local-client";
 
 import { getPublicApiUrl } from "./api-url";
 
@@ -26,7 +27,7 @@ function writeStorage(key: string, value: string | null): void {
 export interface AuthContextValue {
   ready: boolean;
   user: AuthUser | null;
-  client: MeowClient;
+  client: LocalMeowClient;
   workspaceId: string | null;
   completeOAuth: (accessToken: string, refreshToken: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -43,7 +44,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
   const [workspaceId, setWorkspaceId] = React.useState<string | null>(null);
 
   const clientRef = React.useRef(
-    new MeowClient({
+    new LocalMeowClient({
       baseUrl: getApiUrl(),
       accessToken: undefined,
       refreshToken: undefined,

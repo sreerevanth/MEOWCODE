@@ -348,7 +348,7 @@ export function ChatApp(): React.ReactElement {
       const nextHistory = [...messages, { id: userMsgId, role: "user" as const, content: userText }];
       setMessages([...nextHistory, { id: assistantMsgId, role: "assistant", content: "" }]);
 
-      await streamAssistant({ chatId, history: nextHistory, assistantMsgId });
+      await streamAssistant({ chatId: chatId as string, history: nextHistory, assistantMsgId });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send message");
     }

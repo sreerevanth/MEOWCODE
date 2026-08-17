@@ -352,15 +352,16 @@ export class MeowClient {
   }
 
   async *chatCompletionsStream(
-    payload: Record<string, unknown> & { signal?: AbortSignal }
+    payload: Record<string, unknown> & { signal?: AbortSignal; providerKeys?: Record<string, string> }
   ): AsyncIterable<string> {
     await this.ensureFreshToken();
-    const { signal, ...body } = payload;
+    const { signal, providerKeys, ...body } = payload;
     const response = await this.fetchImpl(`${this.baseUrl}/v1/chat/completions`, {
       method: "POST",
       headers: {
         ...this.headers(),
-        "content-type": "application/json"
+        "content-type": "application/json",
+        ...(providerKeys ? { "x-provider-keys": JSON.stringify(providerKeys) } : {})
       },
       body: JSON.stringify({ ...body, stream: true }),
       signal
