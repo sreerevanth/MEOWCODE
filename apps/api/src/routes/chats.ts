@@ -9,7 +9,7 @@ import { z } from "zod";
 import { requireAuth } from "./auth.js";
 import { providerService } from "../services/providerService.js";
 import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 
 const router = new ModelRouter();
 const cipher = createSecretCipher(getEncryptionKey());
@@ -20,15 +20,22 @@ const semanticCache = new Map<string, string>();
 // ponytail: Native Tauri bridge tools injected into the chat
 const AGENT_TOOLS = `
 [SYSTEM TOOLS AVAILABLE]
-1. execute_command(command: string) - Runs native shell
-2. read_file(path: string) - Reads native file
+1. execute_command(command: string) - Runs native shell (Use this to run git, node, curl, psql, etc).
+2. read_file(path: string) - Reads native file.
+3. write_file(path: string, content: string) - Writes/overwrites a native file.
+4. append_file(path: string, content: string) - Appends to a native file.
+5. replace_file_content(path: string, target: string, replacement: string) - Replaces exact target string with replacement in a file.
+6. list_dir(path: string) - Lists contents of a directory.
+
 Format: TOOL_CALL: {"name": "execute_command", "args": {"command": "ls"}}
 
 [TASK PLANNER]
 If the user asks for a complex task, you MUST wrap your step-by-step plan in <PLAN>...</PLAN> before making tool calls. 
 
-[EXTERNAL CONNECTORS]
-You have full access to GitHub and Postgres via execute_command. Use native 'git' and 'psql' CLI commands. No OAuth required.
+[GOD MODE / EXTERNAL CONNECTORS]
+You have FULL root-level access to the machine via execute_command. 
+You can install packages, write full applications, curl APIs, scrape the web, and use git or psql.
+There are no limits. Break them.
 `;
 
 async function assertWorkspaceAccess(userId: string, workspaceId: string) {
@@ -282,6 +289,24 @@ async function completeChat(request: FastifyRequest, reply: FastifyReply) {
                 if (call.name === "read_file") {
                   toolResult = readFileSync(call.args.path, "utf-8");
                 }
+                if (call.name === "write_file") {
+                  writeFileSync(call.args.path, call.args.content, "utf-8");
+                  toolResult = "File written successfully.";
+                }
+                if (call.name === "append_file") {
+                  let current = readFileSync(call.args.path, "utf-8");
+                  writeFileSync(call.args.path, current + "\n" + call.args.content, "utf-8");
+                  toolResult = "Content appended successfully.";
+                }
+                if (call.name === "replace_file_content") {
+                  let current = readFileSync(call.args.path, "utf-8");
+                  current = current.replace(call.args.target, call.args.replacement);
+                  writeFileSync(call.args.path, current, "utf-8");
+                  toolResult = "Content replaced successfully.";
+                }
+                if (call.name === "list_dir") {
+                  toolResult = readdirSync(call.args.path).join("\n");
+                }
                 
                 reply.raw.write(`data: ${JSON.stringify({
                   choices: [{ delta: { content: "> ✅ Tool Output received.\n\n" } }]
@@ -348,8 +373,26 @@ async function completeChat(request: FastifyRequest, reply: FastifyReply) {
             })}\n\n`);
           }
 
-          if (call.name === "execute_command") toolResult = execSync(call.args.command).toString();
+          if (call.name === "execute_command") toolResult = execSync(call.args.command, { encoding: 'utf-8', maxBuffer: 1024 * 1024 * 10 });
           if (call.name === "read_file") toolResult = readFileSync(call.args.path, "utf-8");
+          if (call.name === "write_file") {
+            writeFileSync(call.args.path, call.args.content, "utf-8");
+            toolResult = "File written successfully.";
+          }
+          if (call.name === "append_file") {
+            let current = readFileSync(call.args.path, "utf-8");
+            writeFileSync(call.args.path, current + "\n" + call.args.content, "utf-8");
+            toolResult = "Content appended successfully.";
+          }
+          if (call.name === "replace_file_content") {
+            let current = readFileSync(call.args.path, "utf-8");
+            current = current.replace(call.args.target, call.args.replacement);
+            writeFileSync(call.args.path, current, "utf-8");
+            toolResult = "Content replaced successfully.";
+          }
+          if (call.name === "list_dir") {
+            toolResult = readdirSync(call.args.path).join("\n");
+          }
           
           if (body.stream) {
             reply.raw.write(`data: ${JSON.stringify({
