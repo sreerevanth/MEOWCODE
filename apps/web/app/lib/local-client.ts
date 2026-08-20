@@ -194,7 +194,7 @@ export class LocalMeowClient extends MeowClient {
     
     // We must manually fetch to inject the custom header
     await (this as any).ensureFreshToken?.(); // SDK might have this private
-    const response = await (this as any).fetchImpl(`${this.baseUrl}/v1/chat/completions`, {
+    const response = await (this as any).fetchImpl(`${(this as any).baseUrl}/v1/chat/completions`, {
       method: "POST",
       headers: {
         ...(this as any).headers(),

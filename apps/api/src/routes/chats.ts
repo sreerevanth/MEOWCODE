@@ -8,7 +8,9 @@ import { nowIso } from "@meowcode/shared";
 import { z } from "zod";
 import { requireAuth } from "./auth.js";
 import { providerService } from "../services/providerService.js";
-import { execSync } from "node:child_process";
+import { exec, execSync } from "node:child_process";
+import { promisify } from "node:util";
+const execAsync = promisify(exec);
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 
 const router = new ModelRouter();
@@ -230,9 +232,15 @@ async function completeChat(request: FastifyRequest, reply: FastifyReply) {
     });
   };
 
+
   const executeTool = async (call: any): Promise<string> => {
     if (call.name === "execute_command") {
-      return execSync(call.args.command, { encoding: 'utf-8', maxBuffer: 1024 * 1024 * 10 });
+      try {
+        const { stdout, stderr } = await execAsync(call.args.command, { encoding: 'utf-8', maxBuffer: 1024 * 1024 * 10, timeout: 60000 });
+        return stdout + (stderr ? `\nErrors:\n${stderr}` : '');
+      } catch (e: any) {
+        return `Command failed: ${e.message}\nOutput: ${e.stdout}\nStderr: ${e.stderr}`;
+      }
     }
     if (call.name === "read_file") {
       return readFileSync(call.args.path, "utf-8");

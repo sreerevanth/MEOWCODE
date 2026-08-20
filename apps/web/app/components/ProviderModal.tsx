@@ -30,7 +30,7 @@ export function ProviderModal({ open, onClose, client, workspaceId, onConnected 
     void Promise.all([
       client.providers(workspaceId), 
       client.providerCatalog(),
-      import("../lib/local-db").then(m => m.getAllApiKeys(workspaceId).catch(() => ({})))
+      import("../lib/local-db").then(m => m.getAllApiKeys(workspaceId).catch(() => ({} as Record<string, string>)))
     ]).then(([connected, cat, localKeys]) => {
       setProviders(connected);
       setCatalog(

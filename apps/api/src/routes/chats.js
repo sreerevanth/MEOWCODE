@@ -5,7 +5,9 @@ import { resolvePlugin } from "@meowcode/providers";
 import { nowIso } from "@meowcode/shared";
 import { requireAuth } from "./auth.js";
 import { providerService } from "../services/providerService.js";
-import { execSync } from "node:child_process";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
+const execAsync = promisify(exec);
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 const router = new ModelRouter();
 const cipher = createSecretCipher(getEncryptionKey());
@@ -185,7 +187,13 @@ async function completeChat(request, reply) {
     };
     const executeTool = async (call) => {
         if (call.name === "execute_command") {
-            return execSync(call.args.command, { encoding: 'utf-8', maxBuffer: 1024 * 1024 * 10 });
+            try {
+                const { stdout, stderr } = await execAsync(call.args.command, { encoding: 'utf-8', maxBuffer: 1024 * 1024 * 10, timeout: 60000 });
+                return stdout + (stderr ? `\nErrors:\n${stderr}` : '');
+            }
+            catch (e) {
+                return `Command failed: ${e.message}\nOutput: ${e.stdout}\nStderr: ${e.stderr}`;
+            }
         }
         if (call.name === "read_file") {
             return readFileSync(call.args.path, "utf-8");
