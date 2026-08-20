@@ -681,7 +681,7 @@ export async function authRoutes(app: FastifyInstance) {
 
     const email = body.data.email.toLowerCase().trim();
     const token = createMagicLinkToken(email);
-    const webBase = (process.env.MEOW_WEB_URL ?? "http://localhost:3001").replace(/\/$/, "");
+    const webBase = (process.env.MEOW_WEB_URL ?? "http://localhost:3000").replace(/\/$/, "");
     const link = `${webBase}/auth/callback?magic_token=${token}`;
 
     if (process.env.MEOW_OAUTH_DEV === "true" || process.env.NODE_ENV !== "production") {

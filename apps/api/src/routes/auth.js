@@ -574,7 +574,7 @@ export async function authRoutes(app) {
             return reply.status(400).send({ error: "Valid email required" });
         const email = body.data.email.toLowerCase().trim();
         const token = createMagicLinkToken(email);
-        const webBase = (process.env.MEOW_WEB_URL ?? "http://localhost:3001").replace(/\/$/, "");
+        const webBase = (process.env.MEOW_WEB_URL ?? "http://localhost:3000").replace(/\/$/, "");
         const link = `${webBase}/auth/callback?magic_token=${token}`;
         if (process.env.MEOW_OAUTH_DEV === "true" || process.env.NODE_ENV !== "production") {
             return { ok: true, message: "Magic link generated (dev mode)", link };

@@ -11,7 +11,7 @@ function getApiBase() {
     return (process.env.MEOW_API_URL ?? process.env.API_URL ?? "http://localhost:4000").replace(/\/$/, "");
 }
 function getWebBase() {
-    return (process.env.MEOW_WEB_URL ?? process.env.NEXT_PUBLIC_MEOW_WEB_URL ?? "http://localhost:3001").replace(/\/$/, "");
+    return (process.env.MEOW_WEB_URL ?? process.env.NEXT_PUBLIC_MEOW_WEB_URL ?? "http://localhost:3000").replace(/\/$/, "");
 }
 function oauthSecret() {
     return process.env.MEOW_OAUTH_STATE_SECRET ?? process.env.MEOW_AUTH_SECRET ?? "meow-oauth-state-dev";

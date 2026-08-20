@@ -35,7 +35,7 @@ function getApiBase(): string {
 }
 
 function getWebBase(): string {
-  return (process.env.MEOW_WEB_URL ?? process.env.NEXT_PUBLIC_MEOW_WEB_URL ?? "http://localhost:3001").replace(/\/$/, "");
+  return (process.env.MEOW_WEB_URL ?? process.env.NEXT_PUBLIC_MEOW_WEB_URL ?? "http://localhost:3000").replace(/\/$/, "");
 }
 
 function oauthSecret(): string {
