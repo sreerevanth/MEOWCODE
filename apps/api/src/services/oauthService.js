@@ -158,7 +158,7 @@ export async function exchangeOAuthCode(config, code) {
             accept: "application/json",
             ...(config.id === "github" ? { "user-agent": "MeowCode" } : {})
         },
-        body
+        body: body.toString()
     });
     if (!tokenRes.ok) {
         throw new Error(`OAuth token exchange failed: ${tokenRes.status}`);

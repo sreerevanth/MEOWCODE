@@ -189,7 +189,7 @@ export async function exchangeOAuthCode(
       accept: "application/json",
       ...(config.id === "github" ? { "user-agent": "MeowCode" } : {})
     },
-    body
+    body: body.toString()
   });
 
   if (!tokenRes.ok) {
